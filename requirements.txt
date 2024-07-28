@@ -1,0 +1,5 @@
+python-dotenv==1.0.1
+google-api-python-client==2.136.0
+pydantic==2.7.1
+loguru==0.7.2
+yt-dlp==2024.7.2
