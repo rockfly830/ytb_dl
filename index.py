@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 
-from youtube_dl import Youtube
+from src.youtube_dl.youtube_dl import Youtube
+from datetime import datetime
 import os
 
 if __name__ == "__main__":
@@ -8,16 +9,13 @@ if __name__ == "__main__":
     
     API_KEY = os.getenv("API_KEY")
 
-    CHANNEL_NAME = 'Google'
+    CHANNEL_NAME = 'pladuoficial'
 
     youtube = Youtube(API_KEY)
 
     youtube.set_channel(CHANNEL_NAME)
 
-    playlists = youtube.get_playlists().items
+    youtube.set_filter(lambda x: x.data >= datetime(2024, 7, 28))
 
-    first_playlist = playlists[0].title
-
-    youtube.download_playlist(playlist_name=first_playlist,
-                                output_path=f"./videos/{first_playlist}", 
+    youtube.download_all(output_path=f"./videos/{CHANNEL_NAME}", 
                                 download_thumbnail=True)

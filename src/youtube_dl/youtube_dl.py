@@ -1,6 +1,5 @@
 from googleapiclient.discovery import build
-
-from pydantic import BaseModel, Field, AliasChoices, AliasPath
+from .types import Video, Playlist
 from datetime import datetime
 from loguru import logger
 
@@ -9,6 +8,17 @@ import sys
 import requests
 import yt_dlp
 import json
+
+def get_highest_resolution(item):
+    url = ""
+    highest = 0
+    for _, value in item['thumbnails'].items().__reversed__():
+        current = value['width'] * value['height']
+        if current > highest:
+            highest = current
+            url = value['url']
+
+    return url
 
 def extract_info_videos(items) -> list[Video]:
     infos = []
@@ -24,11 +34,12 @@ def extract_info_videos(items) -> list[Video]:
                     "channel_name": snippet['channelTitle'],
                     "playlist_id": snippet['playlistId'],
                     "id": snippet['resourceId']['videoId'],
-                    "thumbnail": snippet['thumbnails']['maxres']['url'],
+                    "thumbnail": get_highest_resolution(snippet),
                 }))
 
         except Exception as e:
             logger.error(f'Error extraction infos: {e}')
+            print(item)
             exit()
 
     return infos
@@ -53,53 +64,6 @@ def extract_info_playlist(items) -> dict:
     return infos
 
 
-class Video(BaseModel):
-    data: datetime
-    title: str
-    description: str
-    channel_name: str
-    playlist_id: str
-    id: str
-    thumbnail: str
-    
-    def toJSON(self):
-        return {
-            "data": self.data.timestamp(),
-            "title": self.title,
-            "description": self.description,
-            "channel_name": self.channel_name,
-            "playlist_id": self.playlist_id,
-            "id": self.id
-        }
-    
-    def __str__(self):
-        return f"Video(name='{self.title}')"
-
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-class Playlist(BaseModel):
-    id: str
-    title: str
-    videos_count: int
-    thumbnail: str
-    videos: list[Video] = []
-
-    def toJSON(self):
-        return {
-            "id": self.id,
-            "title": self.title,
-            "videos_count": self.videos_count,
-            "thumbnail": self.thumbnail,
-        }
-    
-    def __str__(self):
-        return f"Playlist(name='{self.title}')"
-
-    def __getitem__(self, item):
-        return getattr(self, item)
-
-
 class Youtube:
     _URL = "https://www.youtube.com/watch?v="
 
@@ -111,6 +75,7 @@ class Youtube:
         self._cache = {
             "channel_name": None,
             "channel_id": None,
+            "upload_id": None,
             "playlist": {}
         }
         self._filters = []
@@ -181,8 +146,8 @@ class Youtube:
         if not self._cache.get("channel_id"):
             raise ValueError("You must set a channel!")
 
-        if self._cache.get("upload_id") is not None:
-            return self._cache.get("upload_id")
+        if self._cache["upload_id"] is not None:
+            return self._cache["upload_id"]
 
         channel_id = self._cache["channel_id"]
 
@@ -192,6 +157,7 @@ class Youtube:
         )
         response = request.execute()
 
+        
         self._cache["upload_id"] = response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
         return self._cache["upload_id"]
 
@@ -236,6 +202,39 @@ class Youtube:
 
         pl.videos = videos
         return videos
+    
+    def get_videos_from_uploads(self) -> list[Video]:
+        upload_id = self._cache["upload_id"]
+            
+        videos = []
+        next_page_token = None
+        total_fetched = 0
+
+        while True:
+            try:
+                request = self._API_youtube.playlistItems().list(
+                    part='snippet',
+                    playlistId=upload_id,
+                    maxResults=50,
+                    pageToken=next_page_token
+                )
+                response = request.execute()
+
+                videos.extend(extract_info_videos(response['items']))
+
+                total_fetched += len(response['items'])
+                logger.info(f"fetched {total_fetched:^4} / {response['pageInfo']['totalResults']:^4}")
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    break
+            
+            except Exception as e:
+                logger.error(e)
+                exit()
+
+
+        return videos
 
 
     """ download videos """
@@ -258,7 +257,7 @@ class Youtube:
 
         return True
 
-    def download_video(self, id:str, output_path:str) -> None:
+    def download_video(self, id:str, output_path:str, thumb_path:str = "") -> None:
         ydl_opts = {
             'quiet': True,
             'ignoreerrors': True,
@@ -287,13 +286,15 @@ class Youtube:
         if self._donwload_thumbnail:
             thumb_path = os.path.join(output_path, "thumb")
             os.makedirs(thumb_path, exist_ok=True)
+        else:
+            thumb_path = ""
         
         try:
             total = len(videos)
-            for index, video in enumerate(videos):
-                self.download_video(video.id, output_path)
+            for index, video in enumerate(videos, start=1):
+                self.download_video(video.id, output_path, thumb_path)
 
-                logger.success(f"download {video.title.split('-')[0][:30]} {index} / {total}")
+                logger.success(f"download '{video.title.split('-')[0][:30]}' {index} / {total}")
 
 
         except Exception as e:
@@ -303,7 +304,7 @@ class Youtube:
     def download_all(self, output_path:str = "videos", download_thumbnail:bool = False) -> None:
         self._download_thumbnail = download_thumbnail
         
-        videos = self.get_videos_from_playlist(self._cache["upload_id"])
+        videos = self.get_videos_from_uploads()
 
         videos = self._filter_videos(videos)
 
