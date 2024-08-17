@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 
-from src.youtube_dl.youtube_dl import Youtube
+from youtube_dl.youtube_dl import Youtube
 from datetime import datetime
 import os
 
@@ -9,7 +9,7 @@ if __name__ == "__main__":
     
     API_KEY = os.getenv("API_KEY")
 
-    CHANNEL_NAME = 'pladuoficial'
+    CHANNEL_NAME = ''
 
     youtube = Youtube(API_KEY)
 
